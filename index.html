@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>我的图库</title>
+  <style>
+    :root{
+      --bg:#0f1724;
+      --card:#0b1220;
+      --accent:#4f46e5;
+      --text:#e6eef8;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      background: linear-gradient(180deg,#071028 0%, var(--bg) 100%);
+      color:var(--text);
+      font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      padding:28px 16px;
+    }
+
+    header{
+      width:100%;
+      max-width:1100px;
+      margin-bottom:18px;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+    }
+    .welcome{
+      font-size:20px;
+      font-weight:600;
+      padding:10px 18px;
+      border-radius:999px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+      box-shadow: 0 6px 18px rgba(10,12,20,0.5), inset 0 -2px 8px rgba(255,255,255,0.02);
+      letter-spacing:1px;
+      animation: float 6s ease-in-out infinite;
+    }
+    @keyframes float {
+      0% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+      100% { transform: translateY(0); }
+    }
+
+    .controls{
+      width:100%;
+      max-width:1100px;
+      margin: 6px 0 18px;
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:center;
+    }
+    .info{
+      font-size:13px;
+      opacity:.85;
+    }
+    .btn{
+      background:var(--accent);
+      color:white;
+      border:none;
+      padding:8px 12px;
+      border-radius:8px;
+      cursor:pointer;
+      font-weight:600;
+      box-shadow: 0 6px 18px rgba(79,70,229,0.18);
+    }
+
+    .gallery{
+      width:100%;
+      max-width:1100px;
+      display:grid;
+      grid-template-columns: repeat(auto-fill,minmax(220px,1fr));
+      gap:16px;
+      align-items:start;
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.06));
+      border-radius:12px;
+      overflow:hidden;
+      position:relative;
+      transform-origin:center;
+      transition: transform 300ms ease, box-shadow 300ms ease;
+      box-shadow: 0 8px 20px rgba(2,6,23,0.6);
+      min-height:140px;
+    }
+    .card:hover{
+      transform: translateY(-8px) scale(1.02);
+      box-shadow: 0 18px 40px rgba(10,12,30,0.75);
+    }
+    .card img{
+      display:block;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      vertical-align:middle;
+      opacity:0;
+      transform: translateY(12px) scale(0.995);
+      animation: fadeUp 700ms ease forwards;
+    }
+    @keyframes fadeUp {
+      to { opacity:1; transform: translateY(0) scale(1); }
+    }
+
+    .caption{
+      position:absolute;
+      left:0;
+      right:0;
+      bottom:0;
+      padding:8px 10px;
+      background: linear-gradient(180deg, rgba(0,0,0,0.0), rgba(0,0,0,0.5));
+      color: #fff;
+      font-size:13px;
+      backdrop-filter: blur(4px);
+    }
+
+    .placeholder{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:rgba(230,238,248,0.5);
+      font-size:14px;
+      min-height:140px;
+    }
+
+    @media (max-width:520px){
+      .welcome{ font-size:16px; padding:8px 12px; }
+      .gallery{ gap:10px; grid-template-columns: repeat(auto-fill,minmax(150px,1fr)); }
+      .controls{ flex-direction:column; align-items:flex-start; gap:8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="welcome">欢迎访问我的图库</div>
+  </header>
+
+  <div class="controls">
+    <div class="info" id="info">正在探测图片…</div>
+    <div>
+      <button class="btn" id="refreshBtn">重新探测</button>
+    </div>
+  </div>
+
+  <main class="gallery" id="gallery">
+    <!-- 探测到的图片卡片将被插入到这里 -->
+  </main>
+
+  <script>
+    (function(){
+      const gallery = document.getElementById('gallery');
+      const info = document.getElementById('info');
+      const refreshBtn = document.getElementById('refreshBtn');
+
+      // 配置项 可按需调整
+      const MAX_TRY = 500;        // 最多尝试的编号上限，避免无限循环
+      const STOP_AFTER_MISS = 6;  // 连续缺失多少次就认为后续图片不存在，停止探测
+      const SIMULTANEOUS_PROBES = 6; // 并发探测数量，减少等待
+      const URL_PREFIX = 'p';     // 文件名前缀
+      const URL_SUFFIX = '.jpg';  // 文件名后缀
+
+      let isProbing = false;
+      let foundCount = 0;
+
+      function clearGallery() {
+        gallery.innerHTML = '';
+        foundCount = 0;
+      }
+
+      function createCard(i, src) {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.setAttribute('data-index', i);
+        const img = document.createElement('img');
+        img.src = src;
+        img.loading = 'lazy';
+        img.alt = `p${i}`;
+        const cap = document.createElement('div');
+        cap.className = 'caption';
+        cap.textContent = `p${i}.jpg`;
+        div.appendChild(img);
+        div.appendChild(cap);
+        gallery.appendChild(div);
+      }
+
+      // 探测一个单独编号是否存在，返回 Promise<boolean>
+      function probeOne(i) {
+        return new Promise(resolve => {
+          const probe = new Image();
+          const src = `${URL_PREFIX}${i}${URL_SUFFIX}?_ts=${Date.now()}`;
+          let settled = false;
+          const tidy = (exists) => {
+            if (settled) return;
+            settled = true;
+            // 清理监听以防内存泄漏
+            probe.onload = probe.onerror = null;
+            resolve({i, exists, src});
+          };
+          probe.onload = () => tidy(true);
+          probe.onerror = () => tidy(false);
+          // 超时保护，防止长时间挂起
+          const TO = setTimeout(() => {
+            tidy(false);
+          }, 5000);
+          probe.onload = () => { clearTimeout(TO); tidy(true); };
+          probe.onerror = () => { clearTimeout(TO); tidy(false); };
+          probe.src = src;
+        });
+      }
+
+      // 串行探测但带并发窗口，遇到连续缺失 STOP_AFTER_MISS 则停止
+      async function probeSequence() {
+        if (isProbing) return;
+        isProbing = true;
+        clearGallery();
+        info.textContent = '正在探测图片，请稍候…';
+        let missCount = 0;
+        let index = 1;
+        const startTime = Date.now();
+
+        while (index <= MAX_TRY) {
+          // 批量并发探测一组编号
+          const batch = [];
+          for (let k = 0; k < SIMULTANEOUS_PROBES && index + k <= MAX_TRY; k++) {
+            batch.push(probeOne(index + k));
+          }
+          const results = await Promise.all(batch);
+          for (const res of results) {
+            if (res.exists) {
+              createCard(res.i, res.src.replace(/\?_ts=\d+$/,''));
+              foundCount++;
+              missCount = 0;
+            } else {
+              missCount++;
+            }
+            index++;
+            // 当达到连续缺失阈值则停止整个过程
+            if (missCount >= STOP_AFTER_MISS) {
+              const elapsed = ((Date.now() - startTime)/1000).toFixed(1);
+              info.textContent = `探测结束，共发现 ${foundCount} 张图片，用时 ${elapsed} 秒。`;
+              isProbing = false;
+              return;
+            }
+          }
+        }
+
+        const elapsed = ((Date.now() - startTime)/1000).toFixed(1);
+        info.textContent = `探测完成，共发现 ${foundCount} 张图片，用时 ${elapsed} 秒。`;
+        isProbing = false;
+      }
+
+      // 初次自动探测
+      probeSequence();
+
+      // 重新探测按钮
+      refreshBtn.addEventListener('click', () => {
+        if (isProbing) return;
+        probeSequence();
+      });
+
+      // 可选：点击图片显示大图简单实现
+      gallery.addEventListener('click', (e) => {
+        const target = e.target;
+        if (target.tagName.toLowerCase() === 'img') {
+          const src = target.src;
+          openLightbox(src);
+        }
+      });
+
+      // 简单的 Lightbox
+      function openLightbox(src) {
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.left = 0;
+        overlay.style.top = 0;
+        overlay.style.right = 0;
+        overlay.style.bottom = 0;
+        overlay.style.background = 'rgba(0,0,0,0.85)';
+        overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = 9999;
+        overlay.style.cursor = 'zoom-out';
+        const img = document.createElement('img');
+        img.src = src;
+        img.style.maxWidth = '95%';
+        img.style.maxHeight = '95%';
+        img.style.boxShadow = '0 10px 40px rgba(0,0,0,0.8)';
+        img.style.borderRadius = '6px';
+        overlay.appendChild(img);
+        overlay.addEventListener('click', () => document.body.removeChild(overlay));
+        document.body.appendChild(overlay);
+      }
+
+    })();
+  </script>
+</body>
+</html>
